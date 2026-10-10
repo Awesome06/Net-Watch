@@ -1,50 +1,164 @@
-# NetWatch (Microsoft Innovate 2026)
+# NetWatch — ML-Powered Network Intrusion Detection System
 
-[![CI](https://github.com/Raghav-prog-max/Net-Watch/actions/workflows/ci.yml/badge.svg)](https://github.com/Raghav-prog-max/Net-Watch/actions/workflows/ci.yml)
+An ML-powered passive network intrusion detection system (NIDS) designed to surface high-fidelity, actionable alerts to a Security Operations Center (SOC) analyst. This platform leverages a two-pronged machine learning approach to detect both known campaigns and novel zero-day attacks without blocking or dropping live traffic.
 
-NetWatch is an ML-powered network intrusion detection system designed to surface high-fidelity alerts to a SOC analyst. It leverages a two-pronged approach:
-1. A **LightGBM Classifier** to detect known attack families (DDoS, Botnet, BruteForce, etc.).
-2. An **Isolation Forest Anomaly Detector**, trained exclusively on benign traffic, to catch novel zero-day attacks the classifier has never seen.
+Everything is functional—live traffic simulation (replay), real-time WebSocket alert feeds, strict FPR-budgeted ML scoring, concept drift monitoring, and an interactive SOC dashboard.
 
-Nothing in this repository blocks traffic. The system operates passively, analyzing network flows and presenting triaged alerts.
+## Contents
+- [Quick start](#quick-start)
+- [Tech stack](#tech-stack)
+- [Architecture](#architecture)
+- [Database schema](#database-schema)
+- [API overview](#api-overview)
+- [Edge cases and how they are handled](#edge-cases-and-how-they-are-handled)
+- [Assumptions](#assumptions)
+- [Project layout](#project-layout)
 
----
+## Quick start
+Requires Python 3.11+ and Node 20+. The application comes with scripts to start the backend API, the Next.js SOC dashboard, and the network traffic replay engine concurrently.
 
-## 🚀 Quick Start
+### Mac/Linux
+```bash
+git clone [https://github.com/Awesome06/NetWatch.git](https://github.com/Awesome06/NetWatch.git)
+cd NetWatch
+chmod +x start.sh
+./start.sh
+```
 
-See **[`HOW_TO_RUN.md`](HOW_TO_RUN.md)** for detailed, step-by-step instructions on setting up the virtual environment, generating data, and launching the API and Dashboard.
+### Windows
+```cmd
+git clone [https://github.com/Awesome06/NetWatch.git](https://github.com/Awesome06/NetWatch.git)
+cd NetWatch
+start.bat
+```
 
-## 📖 Documentation
+## Signing in / Initializing
+Authentication is currently mocked to focus on core SOC triage workflows. Upon starting the application, a replay script automatically begins simulating live network traffic using held-out test data. The SQLite database is seeded with initial synthetic benign flows to establish a baseline for the dashboard instantly.
 
-All extensive documentation and architectural explanations have been moved to the `docs/` folder to keep the root clean.
+## Tech stack
 
-| Document | Description |
-|---|---|
-| [`docs/DATA_SETUP.md`](docs/DATA_SETUP.md) | Instructions for downloading and verifying the real CICIDS2017 files. |
-| [`docs/CODE_TOUR.md`](docs/CODE_TOUR.md) | Understanding why each module does what it does. |
-| [`docs/evaluation.md`](docs/evaluation.md) | ML evaluation methodology (Metrics, LOFO, Thresholds). |
-| [`docs/drift_strategy.md`](docs/drift_strategy.md) | Drift monitoring strategy (PSI, KS Test, Alert-rate logic). |
-| [`docs/model_card.md`](docs/model_card.md) | Auto-generated Model Card containing performance metrics. |
-| [`docs/demo_script.md`](docs/demo_script.md) | The 3-minute demo, step by step, with the commands and what to point at. |
+| Layer | Choice |
+| :--- | :--- |
+| **Frontend** | Next.js (App Router), TypeScript, Tailwind CSS |
+| **Backend / API** | Python, FastAPI, WebSockets |
+| **Machine Learning** | LightGBM, scikit-learn (Isolation Forest), Pandas |
+| **Database** | SQLite, SQLAlchemy 2.0 |
+| **Simulation** | Custom Python Replay Engine |
 
-## 📂 Repository Structure
+## Architecture
 
-| Path | Role |
-|---|---|
-| `ml/data/` | Loading, cleaning, label family mapping, leakage-free time-block splits. |
-| `ml/models/` | The LightGBM classifier, Isolation Forest anomaly detector, and `combine.py` for decision logic. |
-| `ml/evaluate/` | Logic for per-class metrics, PR/ROC-AUC, FPR, threshold choice, and LOFO tests. |
-| `ml/drift/` | Monitors PSI per feature, KS tests, and evaluates overall drift status. |
-| `api/` | The FastAPI scoring service, SQLite alert store, and WebSocket feed. |
-| `replay/` | Replays held-out flows (known, novel, drift scenarios) to simulate live traffic for demos. |
-| `dashboard/` | Next.js SOC UI. |
-| `scripts/` | Utilities for dataset download, DB seeding, synthetic data generation, and feedback-based retraining. |
-| `tests/` | Exhaustive `pytest` suite ensuring pipeline integrity. |
+```text
+┌──────────────────────────── Browser ────────────────────────────┐
+│                        Next.js SOC UI                           │
+│                                                                 │
+│   ├── UI Components (Alert Feed, Metrics, Drift Charts)         │
+│   └── State Management (WebSocket Client, REST Fetch)           │
+└───────────────┬───────────────────────────────▲─────────────────┘
+                │ HTTP / REST                   │ WebSockets
+┌───────────────▼───────────────────────────────┴─────────────────┐
+│                        FastAPI Backend                          │
+│                                                                 │
+│   ├── api/            REST endpoints & WS connections           │
+│   ├── models/         Decision Engine (combine.py)              │
+│   └── evaluate/       LightGBM & Isolation Forest Inference     │
+└───────────────▲───────────────────────────────┬─────────────────┘
+                │ Internal API                  │
+┌───────────────┴────────────────┐      ┌───────▼─────────────────┐
+│     Replay Engine (Traffic)    │      │         SQLite          │
+└────────────────────────────────┘      └─────────────────────────┘
+```
 
-## 🛡️ Core Principles
+Three decisions shape everything else:
+1. **Passive Analysis.** Nothing in this repository blocks or drops traffic. The system operates entirely out-of-band, analyzing network flows and presenting triaged alerts to analysts.
+2. **FPR Budgeting over Probability.** The alert threshold does not come from an arbitrary 0.5 probability. It is mathematically derived from a strict false-positive budget (e.g., max 0.5% FPR) to ensure analysts are not overwhelmed with noise.
+3. **True Zero-Day Testing.** Rare attack families (e.g., Infiltration, Heartbleed) are never trained on. They serve purely as test material to validate the Isolation Forest's anomaly detection.
 
-1. **No random train/test split.** Flows are grouped into 5-minute blocks; tests fail the build if a block lands in two splits.
-2. **No bare accuracy.** Reports carry per-class precision and recall, PR-AUC, and false alerts per 10,000 benign flows.
-3. **FPR Budgeting.** The alert threshold comes from a strict false-positive budget (e.g., 0.5%), not from an arbitrary 0.5 probability.
-4. **Zero-Day testing.** Rare families (e.g., Infiltration, Heartbleed) are never trained on. They serve purely as test material for the anomaly detector.
-5. **Passive Analysis.** No code path blocks, drops, or rate-limits live traffic.
+## Database schema
+Three core tables handling the entities and alerts.
+
+```text
+network_flows
+├─ id PK
+├─ timestamp
+├─ src_ip
+├─ dst_ip
+├─ port
+├─ protocol
+├─ bytes_in
+└─ bytes_out
+
+alerts
+├─ id PK
+├─ flow_id ─► network_flows.id
+├─ timestamp
+├─ prediction_type 'known_attack' | 'anomaly'
+├─ severity 'low' | 'medium' | 'high' | 'critical'
+├─ model_confidence
+└─ is_acknowledged BOOLEAN
+
+drift_metrics
+├─ id PK
+├─ timestamp
+├─ feature_name
+├─ psi_score
+├─ ks_stat
+└─ is_drifting BOOLEAN
+```
+
+## API overview
+All REST routes are prefixed with `/api`. Real-time feeds use `/ws`.
+
+| Method | Path | Purpose |
+| :--- | :--- | :--- |
+| `GET` | `/api/alerts` | List recent unacknowledged alerts |
+| `PATCH` | `/api/alerts/{id}` | Update alert status (e.g., mark as acknowledged) |
+| `GET` | `/api/stats` | Retrieve aggregated metrics for the SOC dashboard |
+| `POST` | `/api/ingest` | Ingest new network flow batch from replay/sensor |
+| `WS` | `/ws/alerts` | WebSocket feed for real-time alert broadcasting |
+
+## Edge cases and how they are handled
+
+| Case | Mechanism |
+| :--- | :--- |
+| **Data Leakage** | No random train/test splits. Flows are grouped into 5-minute blocks. The pipeline fails the build if a block lands in both sets. |
+| **Novel / Zero-Day Attacks** | The LightGBM classifier misses these, but the Isolation Forest (trained exclusively on benign traffic) flags them as anomalies. |
+| **Imbalanced Datasets** | Bare accuracy is ignored. Evaluated strictly on per-class precision/recall, PR-AUC, and false alerts per 10,000 benign flows. |
+| **Concept Drift** | Automated scripts monitor Population Stability Index (PSI) and KS tests per feature, flagging drift to trigger retraining. |
+
+## Assumptions
+- **Passive Context:** Assume the system operates on a mirrored port or TAP. It cannot drop packets; it can only alert.
+- **Dataset Focus:** Built and evaluated primarily against CICIDS2017 flow data structures.
+- **Analyst Workflow:** Assume a default SOC analyst is viewing the dashboard; focus remains on data fidelity and alert triage rather than RBAC (Role-Based Access Control) flows.
+
+## Project layout
+
+```text
+.
+├── api/                  # FastAPI scoring service, WebSocket feed
+├── dashboard/            # Next.js SOC UI
+├── docs/                 # Extensive documentation (DATA_SETUP, CODE_TOUR, evaluation)
+├── ml/
+│   ├── data/             # Leakage-free time-block splits and label mapping
+│   ├── drift/            # PSI/KS test monitors for drift
+│   ├── evaluate/         # Metrics, FPR budgeting, LOFO tests
+│   └── models/           # LightGBM, Isolation Forest, combine.py
+├── replay/               # Simulates live traffic for demos
+├── scripts/              # Dataset download, synthetic generation
+├── tests/                # Pytest suite ensuring pipeline integrity
+├── HOW_TO_RUN.md         # Detailed local setup instructions
+└── README.md
+```
+## Documentation
+To keep this root README clean, deep dives into the ML methodology are housed in the `docs/` folder:
+* **[Data Setup & Ingestion](docs/DATA_SETUP.md):** Downloading and verifying CICIDS2017 flow data.
+* **[Code Tour](docs/CODE_TOUR.md):** Architectural deep dive into the dual-model inference pipeline.
+* **[Evaluation Methodology](docs/evaluation.md):** Why we use PR-AUC and strict FPR budgeting over bare accuracy.
+* **[Drift Strategy](docs/drift_strategy.md):** PSI and KS-test monitoring for the LightGBM classifier.
+
+## License
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Contact
+**Mrigank Bhatnagar**  
+* [LinkedIn](https://linkedin.com/in/mrigank-bhatnagar)
+* [GitHub](https://github.com/Awesome06)
