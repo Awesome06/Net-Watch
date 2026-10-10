@@ -11,29 +11,29 @@ Everything is functional—live traffic simulation (replay), real-time WebSocket
 - [Database schema](#database-schema)
 - [API overview](#api-overview)
 - [Edge cases and how they are handled](#edge-cases-and-how-they-are-handled)
+- [Documentation](#documentation)
 - [Assumptions](#assumptions)
 - [Project layout](#project-layout)
 
 ## Quick start
-Requires Python 3.11+ and Node 20+. The application comes with scripts to start the backend API, the Next.js SOC dashboard, and the network traffic replay engine concurrently.
+The application is fully containerized. You can spin up the backend API, the Next.js SOC dashboard, and the network traffic replay engine concurrently using Docker. 
 
-### Mac/Linux
+Requires **Docker** and **Docker Compose**.
+
 ```bash
+# Clone the repository
 git clone [https://github.com/Awesome06/NetWatch.git](https://github.com/Awesome06/NetWatch.git)
 cd NetWatch
-chmod +x start.sh
-./start.sh
-```
 
-### Windows
-```cmd
-git clone [https://github.com/Awesome06/NetWatch.git](https://github.com/Awesome06/NetWatch.git)
-cd NetWatch
-start.bat
+# Build and start all services
+docker compose up --build
 ```
+Once the containers are running:
+* **SOC Dashboard:** Available at `http://localhost:3000`
+* **Backend API:** Available at `http://localhost:8000`
 
-## Signing in / Initializing
-Authentication is currently mocked to focus on core SOC triage workflows. Upon starting the application, a replay script automatically begins simulating live network traffic using held-out test data. The SQLite database is seeded with initial synthetic benign flows to establish a baseline for the dashboard instantly.
+## Initializing
+Upon starting the Docker containers, a replay script automatically begins simulating live network traffic using held-out test data. The SQLite database is seeded with initial synthetic benign flows to establish a baseline for the dashboard instantly.
 
 ## Tech stack
 
@@ -43,6 +43,7 @@ Authentication is currently mocked to focus on core SOC triage workflows. Upon s
 | **Backend / API** | Python, FastAPI, WebSockets |
 | **Machine Learning** | LightGBM, scikit-learn (Isolation Forest), Pandas |
 | **Database** | SQLite, SQLAlchemy 2.0 |
+| **Infrastructure** | Docker, Docker Compose |
 | **Simulation** | Custom Python Replay Engine |
 
 ## Architecture
@@ -125,6 +126,13 @@ All REST routes are prefixed with `/api`. Real-time feeds use `/ws`.
 | **Imbalanced Datasets** | Bare accuracy is ignored. Evaluated strictly on per-class precision/recall, PR-AUC, and false alerts per 10,000 benign flows. |
 | **Concept Drift** | Automated scripts monitor Population Stability Index (PSI) and KS tests per feature, flagging drift to trigger retraining. |
 
+## Documentation
+To keep this root README clean, deep dives into the ML methodology are housed in the `docs/` folder:
+* **[Data Setup & Ingestion](docs/DATA_SETUP.md):** Downloading and verifying CICIDS2017 flow data.
+* **[Code Tour](docs/CODE_TOUR.md):** Architectural deep dive into the dual-model inference pipeline.
+* **[Evaluation Methodology](docs/evaluation.md):** Why we use PR-AUC and strict FPR budgeting over bare accuracy.
+* **[Drift Strategy](docs/drift_strategy.md):** PSI and KS-test monitoring for the LightGBM classifier.
+
 ## Assumptions
 - **Passive Context:** Assume the system operates on a mirrored port or TAP. It cannot drop packets; it can only alert.
 - **Dataset Focus:** Built and evaluated primarily against CICIDS2017 flow data structures.
@@ -145,18 +153,11 @@ All REST routes are prefixed with `/api`. Real-time feeds use `/ws`.
 ├── replay/               # Simulates live traffic for demos
 ├── scripts/              # Dataset download, synthetic generation
 ├── tests/                # Pytest suite ensuring pipeline integrity
-├── HOW_TO_RUN.md         # Detailed local setup instructions
+├── docker-compose.yml    # Multi-container Docker orchestration
 └── README.md
 ```
-## Documentation
-To keep this root README clean, deep dives into the ML methodology are housed in the `docs/` folder:
-* **[Data Setup & Ingestion](docs/DATA_SETUP.md):** Downloading and verifying CICIDS2017 flow data.
-* **[Code Tour](docs/CODE_TOUR.md):** Architectural deep dive into the dual-model inference pipeline.
-* **[Evaluation Methodology](docs/evaluation.md):** Why we use PR-AUC and strict FPR budgeting over bare accuracy.
-* **[Drift Strategy](docs/drift_strategy.md):** PSI and KS-test monitoring for the LightGBM classifier.
 
-## License
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+---
 
 ## Contact
 **Mrigank Bhatnagar**  
